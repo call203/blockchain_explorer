@@ -93,35 +93,68 @@ function printInventory(data) {
 
 function printAddr(data) {
   let offset = 0
-  const count = parseInt(
-    reverse(data.slice(offset, offset + 1)).toString('hex'),
-    16,
-  ) //1 byte
-  console.log('count :' + count)
+  const count = decodeVarInt(data)
+  console.log('count:', count.count)
+
+  const addresses = []
+  offset = count.offset
 
   while (offset + 30 < data.length) {
     const timestamp = new Date(
-      parseInt(
-        reverse(data.slice(offset + 1, offset + 5)).toString('hex'),
-        16,
-      ) * 1000,
+      parseInt(reverse(data.slice(offset, offset + 4)).toString('hex'), 16) *
+        1000,
     ).toISOString()
-    const services = reverse(data.slice(offset + 5, offset + 13)).toString(
+
+    const services = reverse(data.slice(offset + 4, offset + 12)).toString(
       'hex',
-    ) //8byte
-    const address = data.slice(offset + 13, offset + 29) //16byte
+    )
+    // IPv4 to IPv6:
+    const address = data.slice(offset + 12, offset + 28)
+
     const port = parseInt(
-      reverse(data.slice(offset + 29, offset + 31)).toString('hex'),
+      reverse(data.slice(offset + 28, offset + 30)).toString('hex'),
       16,
-    ) //2byte
-    // console.log(`{
-    //       timestamp: ${timestamp},
-    //       services:${services}
-    //       address:${address}
-    //       port:${port}
-    // }`)
-    offset += 30 // Move to the next item
+    )
+    addresses.push({
+      timestamp: timestamp,
+      services: services,
+      address: address,
+      port: port,
+    })
+    offset += 30
   }
+  fs.writeFile('addresses.json', JSON.stringify(addresses, null, 2), (err) => {
+    if (err) throw err
+    console.log('Saved addresses')
+  })
+}
+function decodeVarInt(data) {
+  let count = 0
+  let offset = 0
+  const firstByte = parseInt(
+    reverse(data.slice(0, offset + 1)).toString('hex'),
+    16,
+  )
+  //if 1byte
+  if (firstByte < 0xfd) {
+    count = firstByte
+    offset = 1
+  } else if (firstByte === 0xfd) {
+    //if 2byte
+    count = parseInt(reverse(data.slice(0, offset + 2)).toString('hex'), 16)
+    offset = 3
+  } else if (firstByte === 0xfe) {
+    //if 3byte
+    count = parseInt(reverse(data.slice(0, offset + 4)).toString('hex'), 16)
+    offset = 5
+  }
+  return { count, offset }
+}
+
+function sendPing() {
+  const nonce = crypto.randomBytes(8)
+  socket.write(getMessage('ping', nonce))
+  console.log('Ping has been sent')
 }
 
 const handleMessage = async (command, payload) => {
@@ -140,9 +173,11 @@ const handleMessage = async (command, payload) => {
   } else if (command === 'addr') {
     console.log('Received addr message:')
     printAddr(payload)
-  } else if (command?.startsWith('ping')) {
+  } else if (command === 'ping') {
     console.log('Pong has been sent')
     socket.write(getMessage('pong', payload))
+  } else if (command === 'pong') {
+    console.log('Pong received, connection established.')
   }
 }
 
@@ -164,4 +199,7 @@ const handleMessage = async (command, payload) => {
       offset += 24 + length // size of header (24) + playload length
     }
   })
+  setInterval(() => {
+    sendPing() //Check connection every 60 sec
+  }, 60000)
 })()
