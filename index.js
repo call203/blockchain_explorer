@@ -1,113 +1,167 @@
 const net = require('net')
-const bp = require('bitcoin-protocol')
+const crypto = require('crypto')
+const socket = new net.Socket()
 const fs = require('fs')
 const NODEIP = '34.93.152.123'
 const PORT = 8333
+const MAGIC = 'd9b4bef9'
 
-//Connect to a Bitcoin node's IP address using net library supporing socket
-const socket = net.connect(PORT, NODEIP)
-//Creates a stream which parses raw network bytes and outputs message objects
-const decoder = bp.createDecodeStream()
-//Create a stream which encodes message objects to raw network bytes
-const encoder = bp.createEncodeStream()
-
-socket.pipe(decoder)
-encoder.pipe(socket)
+const reverse = (d) => Buffer.from(d.toString('hex'), 'hex').reverse() //to little-endian btye
+const sha256 = (data) => crypto.createHash('sha256').update(data).digest()
 
 /**
- * Version payload creation as the frist message
+ * Create the payload for `verson` message
+ * folling https://en.bitcoin.it/wiki/Protocol_documentation
  */
-encoder.write({
-  magic: 0xd9b4bef9,
-  command: 'version',
-  payload: {
-    version: 70012,
-    services: Buffer(8).fill(0),
-    timestamp: Math.round(Date.now() / 1000),
-    receiverAddress: {
-      services: Buffer('0100000000000000', 'hex'),
-      address: '0.0.0.0',
-      port: 8333,
-    },
-    senderAddress: {
-      services: Buffer(8).fill(0),
-      address: '0.0.0.0',
-      port: 8333,
-    },
-    nonce: Buffer(8).fill(123),
-    userAgent: 'foobar',
-    startHeight: 0,
-    relay: true,
-  },
-})
-decoder.on('data', function (message) {
-  console.log('Received message:', message.command)
-  if (message.command === 'version') {
-    // Handle received version message
-    console.log('Version message:', message)
-    encoder.write({ magic: 0xd9b4bef9, command: 'verack', payload: {} })
-  } else if (message.command === 'verack') {
-    // Handle received verack message
-    console.log('Verack received, connection established.')
-  } else if (message.command === 'inv') {
-    console.log('Inventory message received:', message.payload)
+const getVersionPayload = () => {
+  const version = reverse(
+    Buffer.from(Number(31900).toString(16).padStart(8, '0'), 'hex'),
+  )
+  const services = Buffer.from('0'.repeat(16), 'hex')
+  const timestamp = Buffer.from('0'.repeat(16), 'hex')
+  const addrRecv = Buffer.from('0'.repeat(52), 'hex')
+  const addrFrom = Buffer.from('0'.repeat(52), 'hex')
+  const nonce = crypto.randomBytes(8)
+  const userAgent = Buffer.from('\x0f/Satoshi:0.7.2', 'utf-8')
+  const startHeight = Buffer.from('0'.repeat(8), 'hex')
+  const relay = Buffer.from('0'.repeat(2), 'hex')
+  const payload = Buffer.concat([
+    version,
+    services,
+    timestamp,
+    addrRecv,
+    addrFrom,
+    nonce,
+    userAgent,
+    startHeight,
+    relay,
+  ])
+  return payload
+}
+
+const getMessage = (type, payload) => {
+  /**Header**/
+  const magic = reverse(Buffer.from(MAGIC, 'hex'))
+  const command = Buffer.from(
+    Buffer.from(type, 'utf-8').toString('hex').padEnd(24, '0'),
+    'hex',
+  ) // the type of message
+  const length = Buffer.from(
+    Number(payload.length).toString(16).padEnd(8, '0'),
+    'hex',
+  ) //size of the upcoming payload
+  const checksum = sha256(sha256(payload)).subarray(0, 4) //1st 4 bytes of SHA-256
+  return Buffer.concat([magic, command, length, checksum, payload])
+}
+
+const handleHeader = async (offset, data) => {
+  const magic = reverse(data.slice(offset, offset + 4)).toString('hex') //4byte
+  const command = data.slice(offset + 4, offset + 16).toString() //12byte
+  const length = parseInt(
+    reverse(data.slice(offset + 16, offset + 20)).toString('hex'),
+    16,
+  ) // byte, convert the hex string into an integer
+
+  const checksum = data.slice(offset + 20, offset + 24) //4byte
+  const payload = data.slice(offset + 24, offset + 24 + length) //rest of data
+  return { magic, length, checksum, payload, command }
+}
+
+/**
+ *`inv`
+ *count: Nu,ber of inventory entries
+ *inventory: inveryory vectors []
+ */
+function printInventory(data) {
+  let offset = 0
+  const count = parseInt(
+    reverse(data.slice(offset, offset + 1)).toString('hex'),
+    16,
+  ) //1byte
+  console.log('count :' + count)
+
+  while (offset + 36 < data.length) {
+    const type = parseInt(
+      reverse(data.slice(offset + 1, offset + 5)).toString('hex'),
+      16,
+    )
+    const hash = reverse(data.slice(offset + 5, offset + 37)).toString('hex') //36byte
+    console.log(`{ type: ${type}, hash:${hash} }`)
+    offset += 36 // Move to the next item
   }
-})
+}
 
-socket.on('error', function (err) {
-  console.error('Connection error:', err)
-})
+function printAddr(data) {
+  let offset = 0
+  const count = parseInt(
+    reverse(data.slice(offset, offset + 1)).toString('hex'),
+    16,
+  ) //1 byte
+  console.log('count :' + count)
 
-socket.on('close', function () {
-  console.log('Connection closed')
-})
+  while (offset + 30 < data.length) {
+    const timestamp = new Date(
+      parseInt(
+        reverse(data.slice(offset + 1, offset + 5)).toString('hex'),
+        16,
+      ) * 1000,
+    ).toISOString()
+    const services = reverse(data.slice(offset + 5, offset + 13)).toString(
+      'hex',
+    ) //8byte
+    const address = data.slice(offset + 13, offset + 29) //16byte
+    const port = parseInt(
+      reverse(data.slice(offset + 29, offset + 31)).toString('hex'),
+      16,
+    ) //2byte
+    // console.log(`{
+    //       timestamp: ${timestamp},
+    //       services:${services}
+    //       address:${address}
+    //       port:${port}
+    // }`)
+    offset += 30 // Move to the next item
+  }
+}
 
-/** HandShake */
-//  if (message.command === 'version') {
-//   // 1. Handle received version message
-//   console.log('Version message:', message)
-//   //2. Send Verack
-//   encoder.write({
-//     magic: 0xd9b4bef9,
-//     command: 'verack',
-//     payload: {},
-//   })
-// }
-// if (message.command === 'verack') {
-//   // After connection is established and verack is received, request data
-//   encoder.write({
-//     magic: 0xd9b4bef9,
-//     command: 'getdata',
-//     payload: {},
-//   })
-// } else if (message.command === 'block' || message.command === 'tx') {
-//   console.log(`Received ${message.command} data:`, message.payload)
-//   // Process the block or transaction here
-// } else if (message.command === 'inv') {
-//   console.log('Inventory message received:', message.payload)
-//   // Handle inventory message by requesting data for each item
-//   const getdataPayload = message.payload.map((inv) => ({
-//     type: inv.type,
-//     hash: inv.hash,
-//   }))
-// } else if (message.command === 'addr') {
-//   // Handle received list of known peers
-//   console.log('Received addr message:', message)
-//   const addresses = message.payload.map((info) => ({
-//     ip: info.address,
-//     port: info.port,
-//     services: info.services.toString('hex'),
-//     timestamp: new Date(info.timestamp * 1000),
-//   }))
-//   fs.writeFileSync('addresses.json', JSON.stringify(addresses))
-//   console.log('Addresses saved to file.')
-// } else if (message.command === 'ping') {
-//   // Respond to ping with a pong
-//   encoder.write({
-//     magic: 0xd9b4bef9,
-//     command: 'pong',
-//     payload: { nonce: message.payload.nonce },
-//   })
-// } else if (message.command === 'pong') {
-//   console.log('Pong received with nonce:', message.payload.nonce)
-// }
+const handleMessage = async (command, payload) => {
+  command = command.replace(/\0/g, '')
+
+  /** HandShake */
+  if (command == 'version') {
+    socket.write(getMessage('verack', Buffer.alloc(0))) //send verack
+    console.log('Verack has been sent')
+  } else if (command == 'verack') {
+    console.log('Verack received, connection established.')
+    socket.write(getMessage('getaddr', Buffer.alloc(0))) //send getaddr
+  } else if (command === 'inv') {
+    console.log('Received inventory message:')
+    printInventory(payload)
+  } else if (command === 'addr') {
+    console.log('Received addr message:')
+    printAddr(payload)
+  } else if (command?.startsWith('ping')) {
+    console.log('Pong has been sent')
+    socket.write(getMessage('pong', payload))
+  }
+}
+
+;(async () => {
+  //Connect to a Bitcoin node IP address using `net` library in JS
+  socket.connect(PORT, NODEIP, () => {
+    console.log(`Connected to ${NODEIP}`)
+    //Send `version`(header + payload) as a first message to send to a node after connecting to that
+    socket.write(getMessage('version', getVersionPayload()))
+  })
+
+  //New data is received
+  socket.on('data', async (data) => {
+    let offset = 0
+    while (offset < data.length) {
+      const { length, command, payload } = await handleHeader(offset, data)
+
+      await handleMessage(command, payload)
+      offset += 24 + length // size of header (24) + playload length
+    }
+  })
+})()
