@@ -27,6 +27,7 @@ Here's how it operates:
 - seed.bitcoin.sprovoost.nl - Sjors Provoost
 
 **Command line**
+
 MacOS and Linux:    `dig seed.bitcoin.sipa.be
 Windows:   `nslookup dig seed.bitcoin.sipa.be`
 
@@ -89,7 +90,7 @@ For variable-length integer decoding, this function parses the count data embedd
 To maintain the connection and check its vitality, this function sends ping data to the Bitcoin node at regular intervals (every 60 seconds), ensuring the network connection still active.
 
 ###### **`handleMessage(command, payload)`**
-Asynchronous and versatile, this function processes incoming messages based on their command types. It handles various message types such as `version`, `verack`, `inv`, `addr`, `ping`, and `pong.
+Asynchronous and versatile, this function processes incoming messages based on their command types. It handles various message types such as `version`, `verack`, `inv`, `addr`, `ping`, and `pong`.
 
 
 
