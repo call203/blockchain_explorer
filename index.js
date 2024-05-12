@@ -86,14 +86,19 @@ function printInventory(data) {
       16,
     )
     const hash = reverse(data.slice(offset + 5, offset + 37)).toString('hex') //36byte
-    console.log(`{ type: ${type}, hash:${hash} }`)
+    console.log(`{ type: ${type}, hash:${hash} }`) //type :1 (tx) , type:2 (block)
     offset += 36 // Move to the next item
   }
 }
 
+/**
+ *`addr`
+ *count: Number of address entries. Note! max:1000, it could larger than 1 byte
+ *addr_list: []
+ */
 function printAddr(data) {
   let offset = 0
-  const count = decodeVarInt(data)
+  const count = decodeVarInt(data) //calculate the count number
   console.log('count:', count.count)
 
   const addresses = []
@@ -109,7 +114,7 @@ function printAddr(data) {
       'hex',
     )
     // IPv4 to IPv6:
-    const address = data.slice(offset + 12, offset + 28)
+    const address = parseIP(data.slice(offset + 12, offset + 28))
 
     const port = parseInt(
       reverse(data.slice(offset + 28, offset + 30)).toString('hex'),
@@ -123,11 +128,32 @@ function printAddr(data) {
     })
     offset += 30
   }
+  //creat and save the file with addresses information
   fs.writeFile('addresses.json', JSON.stringify(addresses, null, 2), (err) => {
     if (err) throw err
     console.log('Saved addresses')
   })
 }
+
+function parseIP(rawAddress) {
+  //if the first 10 bytes are all 0 and the next 2 bytes are both 255(0xff),
+  //it indicates that the address is an Ipv4 address. Otherwise, it will bew parsed as Ipv6.
+  const isIPv4 =
+    rawAddress.slice(0, 10).every((b) => b === 0) &&
+    rawAddress.slice(10, 12).every((b) => b === 0xff)
+
+  if (isIPv4) {
+    return rawAddress.slice(12, 16).join('.')
+  } else {
+    let ipv6 = []
+    for (let i = 0; i < 16; i += 2) {
+      ipv6.push(rawAddress.slice(i, i + 2).toString('hex'))
+    }
+
+    return ipv6.join(':')
+  }
+}
+
 function decodeVarInt(data) {
   let count = 0
   let offset = 0
@@ -174,8 +200,8 @@ const handleMessage = async (command, payload) => {
     console.log('Received addr message:')
     printAddr(payload)
   } else if (command === 'ping') {
-    console.log('Pong has been sent')
     socket.write(getMessage('pong', payload))
+    console.log('Pong has been sent')
   } else if (command === 'pong') {
     console.log('Pong received, connection established.')
   }
