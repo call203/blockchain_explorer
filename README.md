@@ -28,8 +28,8 @@ Here's how it operates:
 
 **Command line**
 
-MacOS and Linux:    `dig seed.bitcoin.sipa.be
-Windows:   `nslookup dig seed.bitcoin.sipa.be`
+- MacOS and Linux:    `dig seed.bitcoin.sipa.be`
+- Windows:   `nslookup dig seed.bitcoin.sipa.be`
 
 
 ### Requirements
@@ -59,6 +59,7 @@ This programme doesn't have any dependencies, it will work simply follow some co
 --- 
 
 
+https://github.com/call203/blockchain_explorer/assets/57412714/95e6b19d-6472-44af-a1e3-ad1969f5915e
 
 
 
